@@ -1,0 +1,82 @@
+/*
+VOICE  : outil de comptoir, net et rassurant, pour commerçants pressés
+IDEA   : le carnet de tampons en carton — une carte, des ronds, l'encre
+PICTURE: la carte à tampons elle-même, grande, aux couleurs de la boutique
+COLOUR : blanc, vert émeraude #00a86b, rose pâle #ffd6e0, noir
+TYPE   : Schibsted Grotesk 800 titres + Schibsted Grotesk texte
+LAYOUT : blocs rectangulaires francs, colonne unique sur téléphone
+*/
+@import url('https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&display=swap');
+:root{color-scheme:light dark;
+  --bg:light-dark(#ffffff,#04140d);--ink:light-dark(#0b0b0b,#eef7f2);--soft:light-dark(#5b6560,#9fb5aa);
+  --line:light-dark(#e3e7e5,#1d3328);--panel:light-dark(#f4f7f5,#0b2118);
+  --em:#00a86b;--em-ink:light-dark(#00774c,#3fd69b);--pink:light-dark(#ffd6e0,#4a2430);--pink-ink:light-dark(#7a1f38,#ffd6e0);
+  --danger:light-dark(#b3261e,#ff8a80);--r:14px}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 'Schibsted Grotesk',system-ui,sans-serif;overflow-x:clip}
+h1,h2,h3{font-weight:800;line-height:1.08;margin:0 0 .4em;text-wrap:balance}
+h1{font-size:clamp(30px,5vw,48px)}h2{font-size:24px}h3{font-size:18px}
+a{color:var(--em-ink)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 max(4vw,16px)}
+.top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px max(4vw,16px);border-bottom:1px solid var(--line)}
+.brand{font-weight:800;font-size:20px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.brand i{width:28px;height:28px;border-radius:50%;background:var(--em);box-shadow:inset 0 0 0 5px var(--bg),0 0 0 2px var(--em)}
+.top .sp{flex:1}
+.btn{font:inherit;font-weight:700;border:0;border-radius:999px;padding:11px 20px;min-height:44px;cursor:pointer;background:var(--ink);color:var(--bg);display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+.btn.em{background:var(--em);color:#fff}.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line)}
+.btn.pink{background:var(--pink);color:var(--pink-ink)}.btn.danger{background:transparent;color:var(--danger);box-shadow:inset 0 0 0 1.5px currentColor}
+.btn.sm{padding:6px 14px;min-height:36px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--em);outline-offset:2px}
+label{display:block;font-weight:500;font-size:14px;margin:0 0 4px}
+input,select,textarea{font:inherit;font-size:16px;width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);min-height:44px}
+input[type=color]{padding:4px;height:44px}
+input[type=checkbox]{width:22px;min-height:22px;height:22px;accent-color:var(--em);vertical-align:middle}
+textarea{min-height:90px;resize:vertical}
+.field{margin-bottom:14px}.hint{color:var(--soft);font-size:14px;margin:4px 0 0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 16px}
+@media(max-width:600px){.grid2,.grid3{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border-radius:var(--r);padding:20px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 20px}
+.tile{background:var(--panel);border-radius:var(--r);padding:16px}
+.tile b{display:block;font-size:clamp(26px,4vw,34px);font-weight:800;line-height:1.1}
+.tile span{color:var(--soft);font-size:14px}
+.tile.em{background:var(--em);color:#fff}.tile.em span{color:#e6fff4}
+.tile.pink{background:var(--pink);color:var(--pink-ink)}.tile.pink span{color:inherit}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:12px max(4vw,16px);border-bottom:1px solid var(--line);scrollbar-width:none}
+.tabs button{flex:none;font:inherit;font-weight:700;border:0;background:transparent;color:var(--soft);padding:9px 14px;border-radius:999px;min-height:44px;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--bg)}
+.view{padding:28px 0 60px}
+.pill{display:inline-block;font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.pill.actif{background:#d4f5e7;color:#00603d}.pill.essai{background:#e5eefc;color:#1b4aa0}
+.pill.expire{background:var(--pink);color:var(--pink-ink)}.pill.suspendu{background:#3a3a3a;color:#fff}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--soft);font-weight:500}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:999px;font-weight:700;z-index:99;width:max-content;max-width:90vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.on{opacity:1}.toast.err{background:var(--danger);color:#fff}
+dialog{border:0;border-radius:18px;padding:24px;max-width:min(460px,92vw);width:100%;background:var(--bg);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--soft)}.err{color:var(--danger)}
+.login{max-width:420px;margin:8vh auto;padding:0 16px}
+.empty{padding:28px;text-align:center;color:var(--soft);border:1.5px dashed var(--line);border-radius:var(--r)}
+code,.mono{font-family:ui-monospace,Menlo,monospace;letter-spacing:.06em}
+/* La carte à tampons */
+.card{--c:#0f5132;--a:#ffc845;position:relative;background:var(--c);color:#fff;border-radius:22px;padding:22px;min-height:250px;max-width:460px;width:100%;
+  display:flex;flex-direction:column;box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 18px 40px -18px rgba(0,0,0,.55);overflow:hidden}
+.card::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 80% at 100% 0,rgba(255,255,255,.18),transparent 55%);pointer-events:none}
+.card .cn{font-weight:800;font-size:22px;line-height:1.1}.card .ct{opacity:.85;font-size:14px}
+.card .stamps{flex:1;display:grid;grid-template-columns:repeat(var(--cols,5),minmax(0,1fr));gap:8px;align-content:center;justify-items:center;margin:14px 0}
+.card .st{width:100%;max-width:52px;aspect-ratio:1;border-radius:50%;border:2px dashed rgba(255,255,255,.5);display:grid;place-items:center;font-weight:800;font-size:12px;color:rgba(255,255,255,.55)}
+.card .st.on{border:0;background:var(--a);color:var(--c);transform:rotate(-12deg);box-shadow:inset 0 0 0 3px rgba(0,0,0,.12)}
+.card .st.on svg{width:58%;height:58%}
+.card .foot{display:flex;justify-content:space-between;align-items:end;gap:10px;font-size:14px}
+.card .foot b{font-size:16px}
+@keyframes pop{0%{transform:scale(.3) rotate(-40deg);opacity:0}70%{transform:scale(1.15) rotate(-8deg)}100%{transform:rotate(-12deg)}}
+.card .st.new{animation:pop .5s ease-out}
+@media(prefers-reduced-motion:reduce){.card .st.new{animation:none}}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}
+.keypad button{font:inherit;font-size:24px;font-weight:700;min-height:60px;border-radius:14px;border:0;background:var(--panel);color:var(--ink);cursor:pointer}
+.pinshow{font-size:34px;letter-spacing:.4em;text-align:center;font-weight:800;min-height:48px}

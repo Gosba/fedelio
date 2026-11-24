@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ma carte de fidélité</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+body{min-height:100vh;display:flex;flex-direction:column}
+main{flex:1;width:100%;max-width:520px;margin:0 auto;padding:22px 16px 40px}
+.hero{display:flex;justify-content:center;margin:6px 0 18px}
+.code{display:flex;gap:16px;align-items:center;background:var(--panel);border-radius:var(--r);padding:14px 16px;margin:0 0 14px}
+.code img{width:84px;height:84px;background:#fff;border-radius:8px;padding:4px;flex:none}
+.code b{font-size:28px;letter-spacing:.14em;font-weight:800;display:block}
+.actions{display:grid;gap:10px;margin:0 0 22px}
+.actions .btn{width:100%}
+.period{background:var(--pink);color:var(--pink-ink);border-radius:var(--r);padding:14px 16px;margin:0 0 14px}
+.period b{display:block;font-size:17px}
+.msg{border-top:1px solid var(--line);padding:12px 0}.msg b{display:block}.msg small{color:var(--soft)}
+.off{text-align:center;padding:60px 16px}
+footer{text-align:center;color:var(--soft);font-size:13px;padding:16px}
+</style></head><body>
+<main id="app"><div class="hero"><div class="card" aria-busy="true"></div></div><p class="muted" style="text-align:center">Chargement de votre carte…</p></main>
+<footer>Carte anonyme : aucune donnée personnelle n'est demandée ni enregistrée.</footer>
+
+<dialog id="pinDlg">
+  <h2 id="pinTitle">Valider mon passage</h2>
+  <p class="muted" id="pinHelp">Tendez votre téléphone au commerçant : il saisit son code.</p>
+  <div class="pinshow" id="pinShow" aria-live="polite"></div>
+  <div class="keypad" id="keypad"></div>
+  <p class="err" id="pinErr" role="alert"></p>
+  <div class="row"><button class="btn ghost" id="pinCancel" type="button">Annuler</button><button class="btn em" id="pinOk" type="button" style="flex:1">Valider</button></div>
+</dialog>
+<dialog id="saveDlg">
+  <h2>Garder ma carte</h2>
+  <p>Votre carte est enregistrée dans ce navigateur. Pour la retrouver sur un autre téléphone ou après avoir effacé vos données, gardez ce lien :</p>
+  <input id="saveLink" readonly>
+  <div class="row" style="margin-top:14px"><button class="btn em" id="copyLink" type="button">Copier le lien</button><button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Fermer</button></div>
+  <p class="hint" id="installHint"></p>
+</dialog>
+
+<script src="/common.js"></script>
+<script>
+{
+const slug = location.pathname.split('/')[2];
+const KEY = 'fidelio:' + slug;
+let card = null, mode = 'stamp', pin = '';
+const store = { get() { try { return localStorage.getItem(KEY); } catch { return null; } }, set(v) { try { localStorage.setItem(KEY, v); } catch {} } };
+
+const params = new URLSearchParams(location.search);
+if (params.get('carte')) { store.set(params.get('carte')); history.replaceState(null, '', location.pathname); }
+
+const link = document.createElement('link'); link.rel = 'manifest'; link.href = `/s/${slug}/manifest.webmanifest`; document.head.append(link);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+async function load() {
+  const id = store.get();
+  try {
+    card = id ? await api('/api/cards/' + encodeURIComponent(id)) : null;
+  } catch (e) { if (e.status !== 404) return fail(e.message); }
+  if (!card) {
+    try { card = await api(`/api/s/${slug}/cards`, { method: 'POST' }); store.set(card.id); }
+    catch (e) { return fail(e.message); }
+  }
+  render();
+}
+function fail(msg) { $('#app').innerHTML = `<div class="off"><h2>Carte indisponible</h2><p class="muted">${esc(msg)}</p></div>`; }
+
+function render(newFrom = -1) {
+  const s = card.shop;
+  document.title = s.name + ' — ma carte';
+  $('meta[name=theme-color]')?.remove(); const m = document.createElement('meta'); m.name = 'theme-color'; m.content = s.color; document.head.append(m);
+  const ready = card.points >= s.goal;
+  $('#app').innerHTML = `
+    <div class="hero"><div class="card" id="cardEl"></div></div>
+    ${!s.active ? '<div class="period"><b>Carte en pause</b>Le programme de fidélité est momentanément suspendu.</div>' : ''}
+    ${s.period ? `<div class="period"><b>${esc(s.period.title)}${s.period.multiplier > 1 ? ' · points x' + esc(s.period.multiplier) : ''}</b>${s.period.message ? esc(s.period.message) + '<br>' : ''}<small>Jusqu'au ${esc(fr(s.period.end))}</small></div>` : ''}
+    <div class="code"><img alt="QR code de votre carte" src="/api/qr.svg?t=${encodeURIComponent(card.code)}"><div><span class="muted">Mon code carte</span><b class="mono">${esc(card.code)}</b><span class="muted" style="font-size:14px">${card.rewards ? `${card.rewards} récompense${card.rewards > 1 ? 's' : ''} obtenue${card.rewards > 1 ? 's' : ''}` : 'À montrer en caisse'}</span></div></div>
+    <div class="actions">
+      ${ready ? '<button class="btn em" id="redeem" type="button">Utiliser ma récompense</button>' : ''}
+      <button class="btn ${ready ? 'ghost' : 'em'}" id="stamp" type="button" ${s.active ? '' : 'disabled'}>Valider mon passage</button>
+      <button class="btn ghost" id="notif" type="button">${card.push ? 'Notifications activées' : 'Recevoir les offres (notifications)'}</button>
+      <button class="btn ghost" id="save" type="button">Garder ma carte</button>
+    </div>
+    ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
+    ${card.messages.length ? `<h3>Actualités</h3>${card.messages.map(x => `<div class="msg"><b>${esc(x.title)}</b>${esc(x.body)}<br><small>${esc(frt(x.at))}</small></div>`).join('')}` : ''}`;
+  renderCard($('#cardEl'), s, card.points, newFrom);
+  $('#stamp').onclick = () => openPin('stamp');
+  $('#redeem') && ($('#redeem').onclick = () => openPin('redeem'));
+  $('#notif').onclick = togglePush;
+  $('#save').onclick = openSave;
+}
+
+// Pavé numérique pour le code commerçant
+$('#keypad').innerHTML = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k => k ? `<button type="button" data-k="${k}" aria-label="${k === '⌫' ? 'Effacer' : k}">${k}</button>` : '<span></span>').join('');
+$('#keypad').onclick = (e) => { const k = e.target.dataset.k; if (!k) return; pin = k === '⌫' ? pin.slice(0, -1) : (pin + k).slice(0, 6); $('#pinShow').textContent = '•'.repeat(pin.length); $('#pinErr').textContent = ''; };
+function openPin(m) {
+  mode = m; pin = ''; $('#pinShow').textContent = ''; $('#pinErr').textContent = '';
+  $('#pinTitle').textContent = m === 'redeem' ? 'Utiliser ma récompense' : 'Valider mon passage';
+  $('#pinHelp').textContent = m === 'redeem' ? `Le commerçant saisit son code pour vous remettre : ${card.shop.reward}.` : 'Tendez votre téléphone au commerçant : il saisit son code.';
+  $('#pinDlg').showModal();
+}
+$('#pinCancel').onclick = () => $('#pinDlg').close();
+$('#pinOk').onclick = async () => {
+  if (pin.length < 4) return $('#pinErr').textContent = 'Code à 4 chiffres minimum';
+  const before = card.points;
+  try {
+    const r = await api(`/api/cards/${encodeURIComponent(card.id)}/${mode}`, { body: { pin } });
+    card = r; $('#pinDlg').close();
+    if (mode === 'redeem') { render(); toast('Récompense validée : ' + r.reward); }
+    else { render(Math.min(before, card.shop.goal)); toast(`+${r.delta} ${card.shop.stampLabel}${r.delta > 1 ? 's' : ''} — merci !`); }
+  } catch (e) { $('#pinErr').textContent = e.message; pin = ''; $('#pinShow').textContent = ''; }
+};
+
+// Notifications push (aucune donnée personnelle : seulement l'adresse technique du navigateur)
+const b64 = (s) => { const p = '='.repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, c => c.charCodeAt(0)); };
+async function togglePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return toast(/iPhone|iPad/.test(navigator.userAgent) ? 'Sur iPhone : touchez Partager puis « Sur l\'écran d\'accueil », puis ouvrez la carte depuis l\'icône.' : 'Votre navigateur ne gère pas les notifications', true);
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (card.push) {
+      const sub = await reg.pushManager.getSubscription(); await sub?.unsubscribe();
+      await api(`/api/cards/${encodeURIComponent(card.id)}/push`, { body: { subscription: null } }); card.push = false; render(); return toast('Notifications désactivées');
+    }
+    if (await Notification.requestPermission() !== 'granted') return toast('Notifications refusées dans le navigateur', true);
+    const { vapid } = await api('/api/info');
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(vapid) });
+    await api(`/api/cards/${encodeURIComponent(card.id)}/push`, { body: { subscription: sub.toJSON() } });
+    card.push = true; render(); toast('Vous recevrez les offres de ' + card.shop.name);
+  } catch (e) { toast('Impossible d\'activer les notifications : ' + e.message, true); }
+}
+function openSave() {
+  $('#saveLink').value = `${location.origin}/s/${slug}?carte=${card.id}`;
+  $('#installHint').textContent = /iPhone|iPad/.test(navigator.userAgent) ? 'Astuce : touchez Partager puis « Sur l\'écran d\'accueil » pour avoir votre carte comme une appli.' : 'Astuce : ajoutez cette page à l\'écran d\'accueil pour retrouver votre carte en un geste.';
+  $('#saveDlg').showModal();
+}
+$('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText($('#saveLink').value); toast('Lien copié'); } catch { $('#saveLink').select(); toast('Sélectionnez et copiez le lien', true); } };
+load();
+}
+</script>
+</body></html>

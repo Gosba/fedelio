@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cartes de fidélité pour commerçants</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:center;padding:clamp(28px,6vw,80px) 0}
+@media(max-width:800px){.hero{grid-template-columns:minmax(0,1fr)}}
+.lead{font-size:19px;max-width:52ch;color:var(--soft)}
+.stack3{position:relative;height:340px}
+.stack3 .card{position:absolute;width:min(380px,90%)}
+.stack3 .card:nth-child(1){top:0;left:8%;transform:rotate(-7deg)}
+.stack3 .card:nth-child(2){top:70px;left:0;transform:rotate(3deg)}
+.band{padding:clamp(28px,4vw,64px) 0;border-top:1px solid var(--line)}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.feat div{background:var(--panel);border-radius:var(--r);padding:20px}
+.price{background:var(--em);color:#fff;border-radius:var(--r);padding:28px;display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between}
+.price b{font-size:48px;font-weight:800;line-height:1}
+</style></head><body>
+<header class="top"><a class="brand" href="/"><i></i><span class="appname">Fidélio</span></a><span class="sp"></span><a class="btn ghost sm" href="/pro">Espace commerçant</a></header>
+<main class="wrap">
+  <section class="hero">
+    <div><h1>La carte de fidélité qui tient dans le téléphone de vos clients</h1>
+      <p class="lead">Une affiche avec un QR code près de la caisse, et c'est tout. Vos clients cumulent leurs tampons sans application à installer, sans inscription, sans donner la moindre donnée personnelle.</p>
+      <div class="row"><a class="btn em" href="/pro">Se connecter</a><a class="btn ghost" href="#tarif">Voir le tarif</a></div></div>
+    <div class="stack3"><div class="card" id="c1"></div><div class="card" id="c2"></div></div>
+  </section>
+  <section class="band"><h2>Tout ce qu'il faut au comptoir</h2>
+    <div class="feat">
+      <div><h3>Points et récompenses</h3>Vous choisissez le nombre de tampons, la récompense et le délai entre deux passages.</div>
+      <div><h3>Périodes programmées</h3>Points doublés pendant les soldes, récompense de Noël, couleurs de saison : la carte change toute seule aux dates prévues.</div>
+      <div><h3>Notifications</h3>Prévenez vos clients d'un arrivage ou d'une offre, directement sur leur téléphone.</div>
+      <div><h3>Zéro donnée personnelle</h3>Ni nom, ni e-mail, ni téléphone : la carte est anonyme et reste dans le téléphone du client.</div>
+    </div></section>
+  <section class="band" id="tarif"><div class="price"><div><b>29 €</b> / mois par point de vente</div><div style="max-width:46ch">Sans engagement. Carte illimitée, périodes, notifications, affiche à imprimer et statistiques inclus.</div></div></section>
+</main>
+<footer class="wrap muted" style="padding:24px 16px">Exemples de cartes à titre d'illustration.</footer>
+<script src="/common.js"></script>
+<script>
+{
+renderCard($('#c1'), { name: 'Boulangerie du Marché', tagline: 'Votre 10e baguette offerte', color: '#0f5132', accent: '#ffc845', goal: 10, reward: 'Une baguette offerte', stampLabel: 'tampon' }, 7);
+renderCard($('#c2'), { name: 'Café Lumière', tagline: 'Soldes : points doublés', color: '#7a1f38', accent: '#ffd6e0', goal: 8, reward: 'Un café offert', stampLabel: 'café', period: { title: 'Soldes : points doublés', color: '#7a1f38' } }, 5);
+api('/api/info').then(i => $$('.appname').forEach(x => x.textContent = i.app)).catch(() => {});
+}
+</script>
+</body></html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administration</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}.bar input{max-width:320px}
+td .sub{color:var(--soft);font-size:14px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.secret{background:var(--pink);color:var(--pink-ink);border-radius:12px;padding:14px;margin:12px 0;font-weight:700}
+@media(max-width:600px){table{font-size:14px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;color:var(--soft);font-size:13px}.acts{justify-content:flex-start}}
+</style></head><body>
+
+<section id="loginView" class="login" hidden>
+  <a class="brand" href="/"><i></i><span class="appname">Fidélio</span></a>
+  <h1 style="margin-top:28px">Accès maintenance</h1>
+  <form id="loginForm"><div class="field"><label for="ap">Mot de passe administrateur</label><input id="ap" type="password" autocomplete="current-password" required></div>
+  <p class="err" id="lerr" role="alert"></p><button class="btn em" style="width:100%">Entrer</button></form>
+</section>
+
+<div id="appView" hidden>
+  <header class="top"><a class="brand" href="/admin"><i></i><span class="appname">Fidélio</span><span class="muted" style="font-weight:500">· administration</span></a><span class="sp"></span>
+    <button class="btn ghost sm" id="chpw" type="button">Mot de passe</button><button class="btn ghost sm" id="logout" type="button">Déconnexion</button></header>
+  <main class="wrap view">
+    <h1 id="headline">Boutiques</h1>
+    <div class="tiles" id="tiles"></div>
+    <div class="panel" id="ppAdmin" style="margin:0 0 20px"></div>
+    <div class="bar"><button class="btn em" id="add" type="button">Ajouter une boutique</button><input id="search" type="search" placeholder="Rechercher une boutique ou un e-mail" aria-label="Rechercher">
+      <select id="filter" aria-label="Filtrer" style="max-width:200px"><option value="">Toutes</option><option value="actif">Actives</option><option value="essai">En essai</option><option value="expire">Expirées</option><option value="suspendu">Suspendues</option></select></div>
+    <div class="scroll"><table class="stack"><thead><tr><th>Boutique</th><th>Statut</th><th>Échéance</th><th class="num">Cartes</th><th class="num">Tampons 30 j</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+  </main>
+</div>
+
+<dialog id="shopDlg"><form id="shopForm">
+  <h2 id="sdt">Nouvelle boutique</h2>
+  <div class="field"><label for="s-n">Nom de la boutique</label><input id="s-n" name="name" required maxlength="80"></div>
+  <div class="field"><label for="s-e">E-mail du commerçant (identifiant)</label><input id="s-e" name="email" type="email" required></div>
+  <div class="grid2" id="editOnly">
+    <div class="field"><label for="s-s">Statut</label><select id="s-s" name="status"><option value="essai">Essai</option><option value="actif">Actif</option><option value="suspendu">Suspendu</option></select></div>
+    <div class="field"><label for="s-u">Échéance</label><input id="s-u" name="paid_until" type="date"></div>
+  </div>
+  <div class="field"><label for="s-no">Notes internes</label><textarea id="s-no" name="notes" maxlength="1000" placeholder="Contact, téléphone, mode de paiement…"></textarea></div>
+  <p class="err" id="serr" role="alert"></p>
+  <div class="row"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn em" style="flex:1">Enregistrer</button></div>
+</form></dialog>
+
+<dialog id="infoDlg"><div id="infoBody"></div><div class="row" style="margin-top:14px"><button class="btn" type="button" data-close>Fermer</button></div></dialog>
+
+<script src="/common.js"></script>
+<script>
+{
+let data = null, editId = null;
+const PP = { ACTIVE: 'prélèvement actif', CANCELLED: 'résilié', SUSPENDED: 'suspendu', EXPIRED: 'expiré', APPROVAL_PENDING: 'en attente', APPROVED: 'validé' };
+const LABEL = { actif: 'Actif', essai: 'Essai', expire: 'Expiré', suspendu: 'Suspendu' };
+async function boot() {
+  try { data = await api('/api/admin/shops'); } catch { $('#loginView').hidden = false; $('#appView').hidden = true; return; }
+  $('#loginView').hidden = true; $('#appView').hidden = false; draw(); ppAdmin();
+}
+function draw() {
+  const s = data.stats;
+  $('#headline').textContent = `${s.total} boutique${s.total > 1 ? 's' : ''} · ${s.mrr} € de revenu mensuel`;
+  $('#tiles').innerHTML = `<div class="tile em"><b>${s.mrr} €</b><span>revenu mensuel récurrent (${s.actifs} × ${data.price} €)</span></div>
+    <div class="tile"><b>${s.essais}</b><span>en période d'essai</span></div>
+    <div class="tile pink"><b>${s.aRelancer}</b><span>à relancer (expirées ou échéance sous 5 jours)</span></div>
+    <div class="tile"><b>${s.paid30} €</b><span>encaissés sur 30 jours</span></div>`;
+  const qy = $('#search').value.toLowerCase(), f = $('#filter').value;
+  const list = data.shops.filter(x => (!f || x.state === f) && (!qy || (x.name + ' ' + x.email + ' ' + x.slug).toLowerCase().includes(qy)));
+  $('#rows').innerHTML = list.length ? list.map(x => `<tr>
+    <td><b>${esc(x.name)}</b><div class="sub">${esc(x.email)} · <a href="/s/${esc(x.slug)}" target="_blank" rel="noopener">/s/${esc(x.slug)}</a></div>${x.notes ? `<div class="sub">${esc(x.notes)}</div>` : ''}</td>
+    <td><span class="pill ${x.state}">${LABEL[x.state]}</span>${x.paypal_status ? `<div class="sub" style="margin-top:4px">PayPal : ${esc(PP[x.paypal_status] || x.paypal_status)}</div>` : ''}</td>
+    <td style="white-space:nowrap">${esc(fr(x.paid_until))}</td>
+    <td class="num">${x.cards}</td><td class="num">${x.stamps30}</td>
+    <td><div class="acts">
+      <button class="btn em sm" data-a="pay" data-id="${x.id}" type="button">+1 mois payé</button>
+      <button class="btn ghost sm" data-a="open" data-id="${x.id}" type="button">Ouvrir son espace</button>
+      <button class="btn ghost sm" data-a="edit" data-id="${x.id}" type="button">Modifier</button>
+      <button class="btn ghost sm" data-a="${x.status === 'suspendu' ? 'resume' : 'suspend'}" data-id="${x.id}" type="button">${x.status === 'suspendu' ? 'Réactiver' : 'Suspendre'}</button>
+      <button class="btn ghost sm" data-a="reset" data-id="${x.id}" type="button">Nouveau mot de passe</button>
+      <button class="btn ghost sm" data-a="hist" data-id="${x.id}" type="button">Paiements</button>
+      <button class="btn danger sm" data-a="del" data-id="${x.id}" type="button">Supprimer</button>
+    </div></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty">${data.shops.length ? 'Aucune boutique ne correspond.' : 'Aucune boutique pour l\'instant. Ajoutez votre premier commerçant.'}</div></td></tr>`;
+}
+async function ppAdmin() {
+  const el = $('#ppAdmin'); let p;
+  try { p = await api('/api/admin/paypal'); } catch { el.hidden = true; return; }
+  if (!p.keys) { el.innerHTML = `<h3>Paiement PayPal : non configuré</h3><p class="muted">Ajoutez les variables PAYPAL_CLIENT_ID et PAYPAL_CLIENT_SECRET dans Railway, puis redémarrez. En attendant, enregistrez les paiements avec « +1 mois payé ».</p>`; return; }
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><div><h3 style="margin:0">PayPal · ${p.mode === 'live' ? 'mode réel' : 'mode test (sandbox)'}</h3>
+    <p class="muted" style="margin:4px 0 0">${p.planId ? `Offre ${esc(p.planId)} · ${p.subscribers} prélèvement${p.subscribers > 1 ? 's' : ''} actif${p.subscribers > 1 ? 's' : ''}${p.webhookId ? '' : ' · webhook manquant'}` : 'Clés reconnues. Il reste à créer l\'offre et le webhook.'}</p></div>
+    <button class="btn ${p.planId ? 'ghost sm' : 'em'}" id="ppSetup" type="button">${p.planId ? 'Recréer l\'offre' : 'Configurer PayPal automatiquement'}</button></div>
+    <p class="hint">Adresse du webhook : ${esc(p.webhookUrl)}</p>`;
+  $('#ppSetup').onclick = async (e) => {
+    const b = e.currentTarget; if (p.planId && !b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Confirmer (les abonnés actuels gardent l\'ancienne offre)'; return; }
+    b.disabled = true; b.textContent = 'Configuration…';
+    try { await api('/api/admin/paypal/setup', { method: 'POST' }); toast('PayPal est prêt'); } catch (err) { toast(err.message, true); }
+    ppAdmin();
+  };
+}
+async function reload() { data = await api('/api/admin/shops'); draw(); }
+function info(html) { $('#infoBody').innerHTML = html; $('#infoDlg').showModal(); }
+$$('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
+$('#search').oninput = draw; $('#filter').onchange = draw;
+$('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/admin/login', { body: { password: $('#ap').value } }); boot(); } catch (err) { $('#lerr').textContent = err.message; } };
+$('#logout').onclick = async () => { await api('/api/admin/logout', { method: 'POST' }); location.reload(); };
+$('#chpw').onclick = () => {
+  info(`<h2>Mot de passe administrateur</h2><form id="apf"><div class="field"><label for="anp">Nouveau mot de passe</label><input id="anp" type="password" minlength="8" required autocomplete="new-password"></div><button class="btn em">Enregistrer</button></form>`);
+  $('#apf').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/admin/password', { body: { password: $('#anp').value } }); $('#infoDlg').close(); toast('Mot de passe modifié'); } catch (err) { toast(err.message, true); } };
+};
+$('#add').onclick = () => { editId = null; $('#sdt').textContent = 'Nouvelle boutique'; $('#shopForm').reset(); $('#editOnly').hidden = true; $('#serr').textContent = ''; $('#shopDlg').showModal(); };
+$('#shopForm').onsubmit = async (e) => {
+  e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
+  try {
+    if (editId) { await api('/api/admin/shops/' + editId, { method: 'PATCH', body: v }); $('#shopDlg').close(); toast('Boutique mise à jour'); }
+    else {
+      const r = await api('/api/admin/shops', { body: v }); $('#shopDlg').close();
+      info(`<h2>Boutique créée</h2><p>Transmettez ces accès au commerçant. Le mot de passe ne sera plus affiché.</p>
+        <div class="secret">Adresse : ${esc(location.origin)}/pro<br>Identifiant : ${esc(v.email)}<br>Mot de passe : <span class="mono">${esc(r.password)}</span></div>
+        <p class="muted">Période d'essai active. Carte client : ${esc(location.origin)}/s/${esc(r.slug)}</p>`);
+    }
+    reload();
+  } catch (err) { $('#serr').textContent = err.message; }
+};
+$('#rows').onclick = async (e) => {
+  const b = e.target.closest('[data-a]'); if (!b) return;
+  const id = b.dataset.id, x = data.shops.find(s => s.id == id), a = b.dataset.a;
+  try {
+    if (a === 'pay') { const r = await api(`/api/admin/shops/${id}/payment`, { body: { months: 1 } }); toast(`${x.name} : payé jusqu'au ${fr(r.paid_until)}`); }
+    if (a === 'open') { await api(`/api/admin/shops/${id}/impersonate`, { method: 'POST' }); window.open('/pro', '_blank'); return; }
+    if (a === 'edit') {
+      editId = id; $('#sdt').textContent = 'Modifier ' + x.name; $('#editOnly').hidden = false; $('#serr').textContent = '';
+      const f = $('#shopForm'); f.elements.name.value = x.name; f.elements.email.value = x.email; f.elements.status.value = x.status; f.elements.paid_until.value = x.paid_until; f.elements.notes.value = x.notes || '';
+      return $('#shopDlg').showModal();
+    }
+    if (a === 'suspend' || a === 'resume') { await api('/api/admin/shops/' + id, { method: 'PATCH', body: { status: a === 'suspend' ? 'suspendu' : 'actif' } }); toast(a === 'suspend' ? 'Boutique suspendue' : 'Boutique réactivée'); }
+    if (a === 'reset') { if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Confirmer ?'; return; } const r = await api(`/api/admin/shops/${id}/reset`, { method: 'POST' }); info(`<h2>Nouveau mot de passe</h2><div class="secret">${esc(x.email)}<br><span class="mono">${esc(r.password)}</span></div>`); }
+    if (a === 'hist') { const p = await api(`/api/admin/shops/${id}/payments`); return info(`<h2>Paiements · ${esc(x.name)}</h2>${p.length ? `<table><thead><tr><th>Date</th><th>Jusqu'au</th><th class="num">Montant</th></tr></thead><tbody>${p.map(r => `<tr><td>${esc(fr(r.at))}</td><td>${esc(fr(r.until))}</td><td class="num">${esc(r.amount)} €</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Aucun paiement enregistré.</p>'}`); }
+    if (a === 'del') { if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Supprimer définitivement ?'; return; } await api('/api/admin/shops/' + id, { method: 'DELETE' }); toast('Boutique supprimée'); }
+    reload();
+  } catch (err) { toast(err.message, true); }
+};
+new MutationObserver(() => { for (const c of document.querySelectorAll('.stack td:not([data-l])')) { let i = 0, p = c; while (p = p.previousElementSibling) i += p.colSpan; c.dataset.l = c.closest('table').rows[0].cells[i]?.textContent || ''; } }).observe(document.body, { childList: true, subtree: true });
+api('/api/info').then(i => $$('.appname').forEach(x => x.textContent = i.app)).catch(() => {});
+boot();
+}
+</script>
+</body></html>

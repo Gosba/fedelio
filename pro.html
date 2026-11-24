@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Espace commerçant</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.caisse{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:800px){.caisse{grid-template-columns:minmax(0,1fr)}}
+.pinbox{background:var(--em);color:#fff;border-radius:var(--r);padding:20px}
+.pinbox b{font-size:clamp(40px,8vw,60px);letter-spacing:.2em;font-weight:800;display:block;line-height:1.1}
+.lookup{display:flex;gap:10px}.lookup input{text-transform:uppercase;letter-spacing:.12em;font-weight:700;font-size:20px}
+.found{margin-top:16px}
+.found .big{font-size:44px;font-weight:800;line-height:1}
+.bars{display:flex;align-items:end;gap:4px;height:120px;margin-top:10px}
+.bars div{flex:1;background:var(--em);border-radius:4px 4px 0 0;min-height:2px;position:relative}
+.bars-l{display:flex;justify-content:space-between;color:var(--soft);font-size:13px;margin-top:6px}
+.editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:start}
+@media(max-width:800px){.editor{grid-template-columns:minmax(0,1fr)}}
+.sticky{position:sticky;top:16px}
+.plist{display:grid;gap:10px}
+.pitem{border:1.5px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;gap:12px;align-items:start;flex-wrap:wrap}
+.pitem .sw{width:14px;height:14px;border-radius:50%;margin-top:6px;flex:none}
+.pitem .g{flex:1;min-width:200px}
+.banner{background:var(--pink);color:var(--pink-ink);padding:12px max(4vw,16px);font-weight:500}
+video{width:100%;border-radius:12px;background:#000;margin-top:10px}
+</style></head><body>
+
+<section id="loginView" class="login" hidden>
+  <a class="brand" href="/"><i></i><span class="appname">Fidélio</span></a>
+  <h1 style="margin-top:28px">Espace commerçant</h1>
+  <form id="loginForm">
+    <div class="field"><label for="le">E-mail</label><input id="le" type="email" autocomplete="username" required></div>
+    <div class="field"><label for="lp">Mot de passe</label><input id="lp" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="lerr" role="alert"></p>
+    <button class="btn em" style="width:100%">Se connecter</button>
+  </form>
+  <p class="hint">Pas encore de compte ? Votre accès est créé par l'administrateur de la plateforme.</p>
+</section>
+
+<div id="appView" hidden>
+  <div id="banner"></div>
+  <header class="top"><a class="brand" href="/pro"><i></i><span id="shopName"></span></a><span class="sp"></span><a class="btn ghost sm" id="openCard" target="_blank" rel="noopener">Voir la carte client</a><button class="btn ghost sm" id="logout" type="button">Déconnexion</button></header>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <main class="wrap view" id="view"></main>
+</div>
+
+<script src="/common.js"></script>
+<script>
+{
+let me = null, tab = 'caisse', current = null, stream = null;
+const TABS = [['caisse', 'Caisse'], ['stats', 'Tableau de bord'], ['carte', 'Ma carte'], ['periodes', 'Périodes & offres'], ['notifs', 'Notifications'], ['affiche', 'Affiche & QR code'], ['compte', 'Abonnement & compte']];
+
+async function boot() {
+  try { me = await api('/api/pro/me'); } catch { $('#loginView').hidden = false; $('#appView').hidden = true; return; }
+  $('#loginView').hidden = true; $('#appView').hidden = false;
+  $('#shopName').textContent = me.name; $('#openCard').href = '/s/' + me.slug;
+  $('#banner').innerHTML = (me.impersonated ? '<div class="banner">Vous êtes connecté en tant qu\'administrateur sur ce compte (accès maintenance).</div>' : '') +
+    (!me.active ? `<div class="banner">Abonnement inactif depuis le ${esc(fr(me.paid_until))} : vos clients ne peuvent plus cumuler de ${esc(me.config.stampLabel)}s. Contactez l'administrateur pour le renouveler (${me.price} € / mois).</div>` : '');
+  const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) tab = h;
+  drawTabs(); show();
+}
+function drawTabs() {
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" data-t="${k}">${l}</button>`).join('');
+}
+$('#tabs').onclick = (e) => { const t = e.target.dataset.t; if (!t) return; tab = t; history.replaceState(null, '', '#' + t); drawTabs(); show(); };
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (me && h !== tab && TABS.some(t => t[0] === h)) { tab = h; drawTabs(); show(); } });
+async function refresh() { me = await api('/api/pro/me'); }
+function show() { stopCam(); ({ caisse, stats, carte, periodes, notifs, affiche, compte })[tab](); }
+
+$('#loginForm').onsubmit = async (e) => {
+  e.preventDefault(); $('#lerr').textContent = '';
+  try { await api('/api/pro/login', { body: { email: $('#le').value, password: $('#lp').value } }); boot(); }
+  catch (err) { $('#lerr').textContent = err.message; }
+};
+$('#logout').onclick = async () => { await api('/api/pro/logout', { method: 'POST' }); location.reload(); };
+
+// ----- Caisse -----
+function caisse() {
+  $('#view').innerHTML = `<div class="caisse">
+    <div class="panel">
+      <h2>Client en caisse</h2>
+      <p class="muted">Saisissez le code à 6 caractères affiché sur la carte du client, ou scannez son QR code.</p>
+      <form class="lookup" id="lk"><input id="code" maxlength="6" autocomplete="off" placeholder="EX : K7M2QD" aria-label="Code carte"><button class="btn em">Chercher</button></form>
+      <div class="row" style="margin-top:10px">${'BarcodeDetector' in window ? '<button class="btn ghost sm" id="scan" type="button">Scanner avec la caméra</button>' : ''}</div>
+      <div id="cam"></div><div class="found" id="found"></div>
+    </div>
+    <div>
+      <div class="pinbox"><span>Votre code de validation</span><b class="mono" id="pin">${esc(me.pin)}</b>
+        <p style="margin:6px 0 12px;opacity:.9">Le client touche « Valider mon passage » sur sa carte, vous saisissez ce code sur son téléphone : il gagne ${me.rules.perVisit * me.rules.multiplier > 1 ? me.rules.perVisit * me.rules.multiplier + ' ' + esc(me.config.stampLabel) + 's' : '1 ' + esc(me.config.stampLabel)}.</p>
+        <button class="btn sm" style="background:#fff;color:#00603d" id="newPin" type="button">Changer le code</button></div>
+      <div class="tiles" style="margin-top:16px">
+        <div class="tile"><b>${me.stats.ready}</b><span>récompense${me.stats.ready > 1 ? 's' : ''} à remettre</span></div>
+        <div class="tile"><b>${me.rules.goal}</b><span>${esc(me.config.stampLabel)}s pour ${esc(me.rules.reward)}</span></div>
+      </div>
+      ${me.rules.period ? `<div class="panel" style="background:var(--pink);color:var(--pink-ink)"><b>Période en cours : ${esc(me.rules.period.title)}</b><br>${me.rules.multiplier > 1 ? 'Points x' + me.rules.multiplier + ' · ' : ''}jusqu'au ${esc(fr(me.rules.period.end_date))}</div>` : ''}
+    </div></div>`;
+  $('#lk').onsubmit = (e) => { e.preventDefault(); lookup($('#code').value); };
+  $('#newPin').onclick = async () => { const r = await api('/api/pro/pin', { method: 'POST', body: {} }); me.pin = r.pin; $('#pin').textContent = r.pin; toast('Nouveau code : ' + r.pin); };
+  $('#scan') && ($('#scan').onclick = startCam);
+  $('#code').focus();
+}
+async function lookup(code) {
+  code = code.trim().toUpperCase(); if (!code) return;
+  try { current = await api('/api/pro/card/' + encodeURIComponent(code)); drawFound(); }
+  catch (e) { $('#found').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function drawFound(flash) {
+  const c = current, ready = c.points >= c.goal;
+  $('#found').innerHTML = `<div class="panel" style="background:var(--bg);border:1.5px solid var(--line)">
+    <div class="row" style="justify-content:space-between"><span class="mono" style="font-weight:800;font-size:20px">${esc(c.code)}</span><span class="muted">carte créée le ${esc(fr(c.created_at))}</span></div>
+    <p><span class="big">${c.points}</span> / ${c.goal} ${esc(me.config.stampLabel)}s ${ready ? '<span class="pill actif">Récompense disponible</span>' : ''}</p>
+    ${flash ? `<p style="color:var(--em-ink);font-weight:700">${esc(flash)}</p>` : ''}
+    <div class="row">
+      <button class="btn em" data-p="${me.rules.perVisit}" type="button">+${Math.round(me.rules.perVisit * me.rules.multiplier)}</button>
+      <button class="btn ghost" data-p="2" type="button">+${Math.round(2 * me.rules.multiplier)}</button>
+      <button class="btn ghost" data-p="-1" type="button">−1 (corriger)</button>
+      ${ready ? `<button class="btn pink" id="redeem" type="button">Remettre : ${esc(me.rules.reward)}</button>` : ''}
+    </div>
+    <p class="hint">${c.rewards} récompense${c.rewards > 1 ? 's' : ''} déjà obtenue${c.rewards > 1 ? 's' : ''} · dernier passage : ${esc(frt(c.last_stamp))}</p></div>`;
+  $$('#found [data-p]').forEach(b => b.onclick = async () => {
+    try { const r = await api(`/api/pro/card/${c.code}/points`, { body: { points: Number(b.dataset.p) } }); current.points = r.points; current.last_stamp = new Date().toISOString(); drawFound((r.delta > 0 ? '+' : '') + r.delta + ' enregistré'); }
+    catch (e) { toast(e.message, true); }
+  });
+  $('#redeem') && ($('#redeem').onclick = async () => {
+    try { const r = await api(`/api/pro/card/${c.code}/redeem`, { method: 'POST' }); current.points = r.points; current.rewards++; drawFound('Récompense remise : ' + r.reward); }
+    catch (e) { toast(e.message, true); }
+  });
+}
+async function startCam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    $('#cam').innerHTML = '<video playsinline muted></video>'; const v = $('#cam video'); v.srcObject = stream; await v.play();
+    const det = new BarcodeDetector({ formats: ['qr_code'] });
+    const tick = async () => {
+      if (!stream) return;
+      try { const r = await det.detect(v); if (r[0]) { const t = r[0].rawValue.trim(); stopCam(); $('#code').value = t; return lookup(t); } } catch {}
+      requestAnimationFrame(tick);
+    }; tick();
+  } catch { toast('Caméra indisponible : saisissez le code', true); }
+}
+function stopCam() { stream?.getTracks().forEach(t => t.stop()); stream = null; const c = $('#cam'); if (c) c.innerHTML = ''; }
+
+// ----- Tableau de bord -----
+async function stats() {
+  await refresh(); const s = me.stats;
+  const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - 13 + i); const k = d.toISOString().slice(0, 10); return { k, v: s.days.find(x => x.d === k)?.v || 0 }; });
+  const max = Math.max(1, ...days.map(d => d.v));
+  $('#view').innerHTML = `<h1>${s.stamps30} ${esc(me.config.stampLabel)}s distribués en 30 jours</h1>
+    <div class="tiles">
+      <div class="tile em"><b>${s.cards}</b><span>cartes clients</span></div>
+      <div class="tile"><b>${s.newCards30}</b><span>nouvelles cartes (30 j)</span></div>
+      <div class="tile"><b>${s.rewards30}</b><span>récompenses remises (30 j)</span></div>
+      <div class="tile pink"><b>${s.push}</b><span>clients joignables par notification</span></div>
+    </div>
+    <div class="panel"><h3>${esc(me.config.stampLabel)}s par jour, 14 derniers jours</h3>
+      <div class="bars">${days.map(d => `<div style="height:${d.v / max * 100}%" title="${esc(fr(d.k))} : ${d.v}"></div>`).join('')}</div>
+      <div class="bars-l"><span>${esc(fr(days[0].k))}</span><span>aujourd'hui</span></div></div>
+    <p class="hint">Statistiques anonymes : la plateforme ne connaît ni le nom ni le contact de vos clients.</p>`;
+}
+
+// ----- Ma carte -----
+function carte() {
+  const c = me.config;
+  $('#view').innerHTML = `<div class="editor"><form id="cf">
+    <h1>Ma carte de fidélité</h1>
+    <div class="field"><label for="f-name">Nom affiché</label><input id="f-name" name="name" value="${esc(me.name)}" maxlength="80"></div>
+    <div class="field"><label for="f-tag">Phrase d'accueil</label><input id="f-tag" name="tagline" value="${esc(c.tagline)}" maxlength="160"></div>
+    <div class="grid2">
+      <div class="field"><label for="f-goal">Nombre de ${esc(c.stampLabel)}s pour la récompense</label><input id="f-goal" name="goal" type="number" min="2" max="50" value="${c.goal}"></div>
+      <div class="field"><label for="f-lbl">Nom de l'unité</label><input id="f-lbl" name="stampLabel" value="${esc(c.stampLabel)}" maxlength="20"><p class="hint">tampon, point, café…</p></div>
+    </div>
+    <div class="field"><label for="f-rew">Récompense</label><input id="f-rew" name="reward" value="${esc(c.reward)}" maxlength="120"></div>
+    <div class="grid2">
+      <div class="field"><label for="f-pv">Gagné par passage</label><input id="f-pv" name="perVisit" type="number" min="1" max="10" value="${c.perVisit}"></div>
+      <div class="field"><label for="f-cd">Délai entre deux passages (heures)</label><input id="f-cd" name="cooldownHours" type="number" min="0" max="72" step="0.5" value="${c.cooldownHours}"><p class="hint">Évite les validations en double.</p></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label for="f-col">Couleur de la carte</label><input id="f-col" name="color" type="color" value="${esc(c.color)}"></div>
+      <div class="field"><label for="f-acc">Couleur des tampons</label><input id="f-acc" name="accent" type="color" value="${esc(c.accent)}"></div>
+    </div>
+    <div class="field"><label for="f-adr">Adresse ou horaires (facultatif)</label><input id="f-adr" name="address" value="${esc(c.address)}" maxlength="160"></div>
+    <button class="btn em">Enregistrer</button>
+  </form>
+  <div class="sticky"><p class="muted">Aperçu en direct</p><div class="card" id="prev"></div><p class="hint">Pendant une période, la couleur, l'objectif et la récompense de la période s'appliquent à la place.</p></div></div>`;
+  const form = $('#cf');
+  const read = () => Object.fromEntries(new FormData(form));
+  const preview = () => { const v = read(); renderCard($('#prev'), { ...c, ...v, name: v.name, goal: Math.min(Math.max(parseInt(v.goal) || 2, 2), 50), period: null }, Math.min(3, (parseInt(v.goal) || 2) - 1)); };
+  form.oninput = preview; preview();
+  form.onsubmit = async (e) => { e.preventDefault(); try { await api('/api/pro/config', { method: 'PUT', body: read() }); await refresh(); $('#shopName').textContent = me.name; toast('Carte enregistrée'); } catch (err) { toast(err.message, true); } };
+}
+
+// ----- Périodes -----
+async function periodes() {
+  const list = await api('/api/pro/periods'), t = new Date().toISOString().slice(0, 10);
+  $('#view').innerHTML = `<h1>Périodes & offres</h1>
+    <p class="muted" style="max-width:62ch">Programmez vos temps forts : points doublés pendant les soldes, récompense spéciale à Noël, carte aux couleurs de l'été… Pendant la période, la carte de vos clients change automatiquement.</p>
+    <div class="row" style="margin:16px 0"><button class="btn em" id="addP" type="button">Nouvelle période</button>
+      <button class="btn ghost sm" data-preset="noel" type="button">Modèle Noël</button><button class="btn ghost sm" data-preset="soldes" type="button">Modèle soldes</button><button class="btn ghost sm" data-preset="rentree" type="button">Modèle rentrée</button></div>
+    <div class="plist">${list.length ? list.map(p => {
+      const st = p.end_date < t ? 'Terminée' : p.start_date > t ? 'À venir' : 'En cours';
+      return `<div class="pitem"><span class="sw" style="background:${esc(p.color || me.config.color)}"></span><div class="g"><b>${esc(p.title)}</b> <span class="pill ${st === 'En cours' ? 'actif' : st === 'À venir' ? 'essai' : 'expire'}">${st}</span><br>
+        <span class="muted">${esc(fr(p.start_date))} → ${esc(fr(p.end_date))}${p.multiplier > 1 ? ' · points x' + esc(p.multiplier) : ''}${p.goal ? ' · objectif ' + esc(p.goal) : ''}${p.reward ? ' · ' + esc(p.reward) : ''}${p.notify ? ' · notification ' + (p.notified ? 'envoyée' : 'programmée') : ''}</span>
+        ${p.message ? `<br>${esc(p.message)}` : ''}</div>
+        <div class="row"><button class="btn ghost sm" data-edit="${p.id}" type="button">Modifier</button><button class="btn danger sm" data-del="${p.id}" type="button">Supprimer</button></div></div>`;
+    }).join('') : '<div class="empty">Aucune période programmée. Votre carte suit ses réglages habituels.</div>'}</div>
+    <dialog id="pd"><form id="pf"><h2 id="pdt">Nouvelle période</h2>
+      <div class="field"><label for="p-t">Titre</label><input id="p-t" name="title" required maxlength="80"></div>
+      <div class="grid2"><div class="field"><label for="p-s">Début</label><input id="p-s" name="start_date" type="date" required></div><div class="field"><label for="p-e">Fin</label><input id="p-e" name="end_date" type="date" required></div></div>
+      <div class="field"><label for="p-m">Message affiché sur la carte</label><textarea id="p-m" name="message" maxlength="300"></textarea></div>
+      <div class="grid3"><div class="field"><label for="p-x">Points x</label><select id="p-x" name="multiplier"><option value="1">x1</option><option value="2">x2</option><option value="3">x3</option></select></div>
+        <div class="field"><label for="p-g">Objectif</label><input id="p-g" name="goal" type="number" min="2" max="50" placeholder="${me.config.goal}"></div>
+        <div class="field"><label for="p-c">Couleur</label><input id="p-c" name="color" type="color" value="${esc(me.config.color)}"></div></div>
+      <div class="field"><label for="p-r">Récompense spéciale (facultatif)</label><input id="p-r" name="reward" maxlength="120" placeholder="${esc(me.config.reward)}"></div>
+      <div class="field"><label><input type="checkbox" name="notify" id="p-n"> Envoyer une notification aux clients le premier jour</label></div>
+      <p class="err" id="perr" role="alert"></p>
+      <div class="row"><button class="btn ghost" type="button" id="pcancel">Annuler</button><button class="btn em" style="flex:1">Enregistrer</button></div></form></dialog>`;
+  let editId = null; const f = $('#pf');
+  const y = new Date().getFullYear(), PRESETS = {
+    noel: { title: 'Noël gourmand', start_date: `${y}-12-01`, end_date: `${y}-12-31`, multiplier: 2, message: 'Tous vos passages comptent double jusqu\'à Noël !', color: '#b3261e', notify: true },
+    soldes: { title: 'Soldes d\'hiver', start_date: `${y + 1}-01-07`, end_date: `${y + 1}-02-03`, multiplier: 2, message: 'Points doublés pendant toutes les soldes.', color: '#1b4aa0', notify: true },
+    rentree: { title: 'Rentrée', start_date: `${y}-09-01`, end_date: `${y}-09-30`, multiplier: 1, message: 'Une récompense spéciale pour la rentrée.', color: '#00a86b', notify: true },
+  };
+  const open = (p = {}) => {
+    editId = p.id || null; $('#pdt').textContent = editId ? 'Modifier la période' : 'Nouvelle période'; f.reset(); $('#perr').textContent = '';
+    for (const [k, v] of Object.entries(p)) { const el = f.elements[k]; if (!el || v == null) continue; el.type === 'checkbox' ? el.checked = !!v : el.value = v; }
+    if (!p.start_date) { f.elements.start_date.value = t; }
+    $('#pd').showModal();
+  };
+  $('#addP').onclick = () => open();
+  $$('[data-preset]').forEach(b => b.onclick = () => open(PRESETS[b.dataset.preset]));
+  $$('[data-edit]').forEach(b => b.onclick = () => open(list.find(p => p.id == b.dataset.edit)));
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (b.dataset.sure) { await api('/api/pro/periods/' + b.dataset.del, { method: 'DELETE' }); periodes(); } else { b.dataset.sure = 1; b.textContent = 'Confirmer ?'; } });
+  $('#pcancel').onclick = () => $('#pd').close();
+  f.onsubmit = async (e) => {
+    e.preventDefault(); const v = Object.fromEntries(new FormData(f)); v.notify = f.elements.notify.checked;
+    try { await api('/api/pro/periods' + (editId ? '/' + editId : ''), { method: editId ? 'PUT' : 'POST', body: v }); $('#pd').close(); await refresh(); periodes(); toast('Période enregistrée'); }
+    catch (err) { $('#perr').textContent = err.message; }
+  };
+}
+
+// ----- Notifications -----
+async function notifs() {
+  const list = await api('/api/pro/messages');
+  $('#view').innerHTML = `<div class="editor"><form id="nf"><h1>Notifications</h1>
+    <p class="muted">${me.stats.push} client${me.stats.push > 1 ? 's ont' : ' a'} activé les notifications. Le message apparaît aussi dans les actualités de toutes les cartes. 3 envois maximum par jour.</p>
+    <div class="field"><label for="n-t">Titre</label><input id="n-t" name="title" maxlength="60" required placeholder="Arrivage du jour"></div>
+    <div class="field"><label for="n-b">Message</label><textarea id="n-b" name="body" maxlength="240" required placeholder="Les galettes des rois sont arrivées ! Un tampon offert ce samedi."></textarea><p class="hint"><span id="cnt">0</span> / 240 caractères</p></div>
+    <button class="btn em" ${me.active ? '' : 'disabled'}>Envoyer maintenant</button></form>
+    <div><h3>Derniers envois</h3>${list.length ? list.map(m => `<div class="pitem" style="margin-bottom:10px"><div class="g"><b>${esc(m.title)}</b><br>${esc(m.body)}<br><span class="muted">${esc(frt(m.at))} · ${m.sent} notification${m.sent > 1 ? 's' : ''} reçue${m.sent > 1 ? 's' : ''}</span></div></div>`).join('') : '<div class="empty">Aucun message envoyé pour l\'instant.</div>'}</div></div>`;
+  $('#n-b').oninput = (e) => $('#cnt').textContent = e.target.value.length;
+  $('#nf').onsubmit = async (e) => { e.preventDefault(); try { const r = await api('/api/pro/messages', { body: Object.fromEntries(new FormData(e.target)) }); toast(`Envoyé à ${r.sent} téléphone${r.sent > 1 ? 's' : ''}`); notifs(); } catch (err) { toast(err.message, true); } };
+}
+
+// ----- Affiche -----
+function affiche() {
+  $('#view').innerHTML = `<div class="editor"><div><h1>Affiche & QR code</h1>
+    <p>Imprimez l'affiche et posez-la près de la caisse ou en vitrine. Vos clients scannent le QR code : leur carte s'ouvre immédiatement, sans inscription.</p>
+    <div class="row"><a class="btn em" href="/s/${esc(me.slug)}/affiche" target="_blank" rel="noopener">Ouvrir l'affiche à imprimer</a><a class="btn ghost" href="/api/s/${esc(me.slug)}/qr.svg" download="qr-${esc(me.slug)}.svg">Télécharger le QR code</a></div>
+    <div class="field" style="margin-top:20px"><label for="lnk">Lien de votre carte (réseaux sociaux, site, e-mail)</label><div class="lookup"><input id="lnk" readonly value="${esc(me.url)}"><button class="btn ghost" id="cp" type="button">Copier</button></div></div></div>
+    <div class="panel" style="text-align:center"><img src="/api/s/${esc(me.slug)}/qr.svg" alt="QR code de la carte" style="width:min(260px,100%);background:#fff;padding:10px;border-radius:12px"><p class="mono">${esc(me.url)}</p></div></div>`;
+  $('#cp').onclick = async () => { try { await navigator.clipboard.writeText(me.url); toast('Lien copié'); } catch { $('#lnk').select(); } };
+}
+
+// ----- Compte -----
+function compte() {
+  $('#view').innerHTML = `<h1>Abonnement & compte</h1>
+    <div class="tiles"><div class="tile ${me.active ? 'em' : 'pink'}"><b>${me.active ? (me.status === 'essai' ? 'Essai' : 'Actif') : 'Inactif'}</b><span>${me.active ? 'jusqu\'au ' + esc(fr(me.paid_until)) : 'depuis le ' + esc(fr(me.paid_until))}</span></div>
+    <div class="tile"><b>${me.price} €</b><span>par mois, sans engagement</span></div></div>
+    <p class="muted" style="max-width:62ch">L'abonnement comprend la carte de fidélité illimitée, les périodes, les notifications et l'affiche.</p>
+    <div class="panel" id="pp" style="max-width:560px"><p class="muted">Chargement du paiement…</p></div>
+    <form id="pw" class="panel" style="max-width:460px;margin-top:20px"><h3>Changer de mot de passe</h3>
+      <p class="muted">${esc(me.email)}</p>
+      <div class="field"><label for="np">Nouveau mot de passe</label><input id="np" type="password" minlength="8" autocomplete="new-password" required></div>
+      <button class="btn">Mettre à jour</button></form>`;
+  $('#pw').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/pro/password', { body: { password: $('#np').value } }); toast('Mot de passe modifié'); e.target.reset(); } catch (err) { toast(err.message, true); } };
+  paypalBox();
+}
+// ----- Paiement PayPal -----
+let ppLoaded = null;
+function loadPayPal(clientId) {
+  return ppLoaded ||= new Promise((ok, ko) => {
+    const s = document.createElement('script');
+    s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&vault=true&intent=subscription&currency=EUR&locale=fr_FR`;
+    s.onload = ok; s.onerror = () => { ppLoaded = null; ko(new Error('PayPal ne répond pas')); }; document.head.append(s);
+  });
+}
+async function paypalBox() {
+  const box = $('#pp'); if (!box) return;
+  let p; try { p = await api('/api/pro/paypal'); } catch { box.hidden = true; return; }
+  if (!p.ready) { box.innerHTML = '<h3>Paiement</h3><p class="muted">Pour régler votre abonnement, contactez l\'administrateur de la plateforme.</p>'; return; }
+  if (p.status === 'ACTIVE') {
+    box.innerHTML = `<h3>Prélèvement PayPal actif</h3><p>${me.price} € prélevés chaque mois${p.next ? `, prochain prélèvement le <b>${esc(fr(p.next))}</b>` : ''}.</p>
+      <button class="btn danger sm" id="ppCancel" type="button">Résilier l'abonnement</button><p class="hint">En cas de résiliation, votre carte reste active jusqu'à la fin du mois payé.</p>`;
+    $('#ppCancel').onclick = async (e) => {
+      const b = e.currentTarget; if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Confirmer la résiliation'; return; }
+      try { await api('/api/pro/paypal/cancel', { method: 'POST' }); toast('Abonnement résilié'); await refresh(); paypalBox(); } catch (err) { toast(err.message, true); }
+    };
+    return;
+  }
+  box.innerHTML = `<h3>Payer avec PayPal</h3>
+    <p>${me.price} € par mois, prélevés automatiquement. Carte bancaire acceptée, même sans compte PayPal. Résiliable à tout moment.</p>
+    ${p.startTime ? `<p class="hint">Les jours d'essai ou déjà payés sont conservés : premier prélèvement le ${esc(fr(p.startTime.slice(0, 10)))}.</p>` : ''}
+    ${p.status === 'CANCELLED' || p.status === 'SUSPENDED' ? '<p class="err">Votre précédent abonnement PayPal est arrêté.</p>' : ''}
+    ${p.mode === 'sandbox' ? '<p class="hint">Mode test (sandbox) : aucun vrai paiement.</p>' : ''}
+    <div id="ppButtons" style="max-width:380px;margin-top:12px"></div>`;
+  try {
+    await loadPayPal(p.clientId);
+    window.paypal.Buttons({
+      style: { shape: 'pill', label: 'subscribe' },
+      createSubscription: (d, actions) => actions.subscription.create({ plan_id: p.planId, custom_id: p.customId, ...(p.startTime ? { start_time: p.startTime } : {}) }),
+      onApprove: async (data) => {
+        try { await api('/api/pro/paypal/confirm', { body: { subscriptionID: data.subscriptionID } }); toast('Merci ! Votre abonnement est en place'); await refresh(); boot(); }
+        catch (err) { toast(err.message, true); }
+      },
+      onError: () => toast('Le paiement PayPal n\'a pas abouti', true),
+    }).render('#ppButtons');
+  } catch (err) { $('#ppButtons').innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+}
+api('/api/info').then(i => $$('.appname').forEach(x => x.textContent = i.app)).catch(() => {});
+boot();
+}
+</script>
+</body></html>
