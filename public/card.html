@@ -16,6 +16,7 @@ main{flex:1;width:100%;max-width:520px;margin:0 auto;padding:22px 16px 40px}
 .period b{display:block;font-size:17px}
 .msg{border-top:1px solid var(--line);padding:12px 0}.msg b{display:block}.msg small{color:var(--soft)}
 .off{text-align:center;padding:60px 16px}
+.btn.gw{background:#1f1f1f;color:#fff}
 footer{text-align:center;color:var(--soft);font-size:13px;padding:16px}
 </style></head><body>
 <main id="app"><div class="hero"><div class="card" aria-busy="true"></div></div><p class="muted" style="text-align:center">Chargement de votre carte…</p></main>
@@ -42,7 +43,8 @@ footer{text-align:center;color:var(--soft);font-size:13px;padding:16px}
 {
 const slug = location.pathname.split('/')[2];
 const KEY = 'fidelio:' + slug;
-let card = null, mode = 'stamp', pin = '';
+let card = null, mode = 'stamp', pin = '', gwOn = false;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const store = { get() { try { return localStorage.getItem(KEY); } catch { return null; } }, set(v) { try { localStorage.setItem(KEY, v); } catch {} } };
 
 const params = new URLSearchParams(location.search);
@@ -78,6 +80,7 @@ function render(newFrom = -1) {
       ${ready ? '<button class="btn em" id="redeem" type="button">Utiliser ma récompense</button>' : ''}
       <button class="btn ${ready ? 'ghost' : 'em'}" id="stamp" type="button" ${s.active ? '' : 'disabled'}>Valider mon passage</button>
       <button class="btn ghost" id="notif" type="button">${card.push ? 'Notifications activées' : 'Recevoir les offres (notifications)'}</button>
+      ${gwOn && !isIOS ? '<button class="btn gw" id="gwBtn" type="button"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="#4285f4"/><rect x="2" y="9" width="20" height="10" rx="3" fill="#34a853"/><rect x="2" y="13" width="20" height="6" rx="3" fill="#fbbc04"/><rect x="2" y="16" width="20" height="4" rx="2" fill="#ea4335"/></svg>Ajouter à Google Wallet</button>' : ''}
       <button class="btn ghost" id="save" type="button">Garder ma carte</button>
     </div>
     ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
@@ -87,6 +90,11 @@ function render(newFrom = -1) {
   $('#redeem') && ($('#redeem').onclick = () => openPin('redeem'));
   $('#notif').onclick = togglePush;
   $('#save').onclick = openSave;
+  $('#gwBtn') && ($('#gwBtn').onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { const r = await api(`/api/cards/${encodeURIComponent(card.id)}/google-wallet`); location.href = r.url; }
+    catch (err) { toast(err.message, true); b.disabled = false; }
+  });
 }
 
 // Pavé numérique pour le code commerçant
@@ -135,6 +143,7 @@ function openSave() {
   $('#saveDlg').showModal();
 }
 $('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText($('#saveLink').value); toast('Lien copié'); } catch { $('#saveLink').select(); toast('Sélectionnez et copiez le lien', true); } };
+api('/api/info').then(i => { gwOn = !!i.googleWallet; if (card) render(); }).catch(() => {});
 load();
 }
 </script>

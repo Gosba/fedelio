@@ -94,9 +94,19 @@ Pour sauvegarder les données, Railway propose des *Backups* sur le volume. Acti
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | Clés de l'app PayPal | — |
 | `PORT` | Port d'écoute (fourni par Railway) | 3000 |
 
+## Google Wallet (Android)
+
+Le client touche « Ajouter à Google Wallet » sur sa carte. Ses tampons s'y mettent à jour à chaque passage, et les messages du commerçant y apparaissent avec une notification.
+
+1. Sur **pay.google.com/business/console**, créez un compte émetteur Google Wallet (gratuit) et notez l'**Issuer ID**.
+2. Sur **console.cloud.google.com**, créez un projet, activez l'**API Google Wallet**, créez un **compte de service** et téléchargez sa clé au format JSON.
+3. Dans la console Google Wallet, onglet *Utilisateurs*, invitez l'e-mail du compte de service avec le rôle *Développeur*.
+4. Dans Railway, ajoutez `GOOGLE_WALLET_ISSUER_ID` (l'Issuer ID) et `GOOGLE_WALLET_SA_JSON` (le contenu complet du fichier JSON).
+5. Tant que Google n'a pas validé votre compte pour la production, seuls les comptes Google ajoutés comme testeurs peuvent enregistrer les cartes. Demandez l'accès production depuis la console.
+
 ## Pistes pour la suite
 
 - Prélèvement SEPA avec Stripe, en complément de PayPal.
 - E-mail automatique au commerçant à J-5 de l'échéance.
 - Plusieurs points de vente pour une même enseigne.
-- Ajout de la carte dans Apple Wallet et Google Wallet (cela demande des comptes développeur payants).
+- Apple Wallet (demande l'Apple Developer Program, payant).

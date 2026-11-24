@@ -9,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite');
 const webpush = require('web-push');
 const QRCode = require('qrcode');
 const paypal = require('./paypal');
+const gw = require('./googlewallet');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS payments(
   id INTEGER PRIMARY KEY, shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   amount REAL NOT NULL, until TEXT NOT NULL, at TEXT NOT NULL, note TEXT DEFAULT '');
 `);
-for (const m of ['ALTER TABLE shops ADD COLUMN paypal_sub TEXT', 'ALTER TABLE shops ADD COLUMN paypal_status TEXT', 'ALTER TABLE shops ADD COLUMN paypal_next TEXT', 'ALTER TABLE payments ADD COLUMN ref TEXT'])
+for (const m of ['ALTER TABLE shops ADD COLUMN paypal_sub TEXT', 'ALTER TABLE shops ADD COLUMN paypal_status TEXT', 'ALTER TABLE shops ADD COLUMN paypal_next TEXT', 'ALTER TABLE payments ADD COLUMN ref TEXT', 'ALTER TABLE cards ADD COLUMN gw INTEGER NOT NULL DEFAULT 0'])
   try { db.exec(m); } catch {}
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS payments_ref ON payments(ref) WHERE ref IS NOT NULL');
 const q = (sql) => db.prepare(sql);
@@ -157,7 +158,29 @@ function limit(key, max, ms) {
   h.push(t); hits.set(key, h); return h.length > max;
 }
 
-app.get('/api/info', (req, res) => res.json({ app: APP_NAME, price: PRICE, vapid: VAPID.publicKey }));
+app.get('/api/info', (req, res) => res.json({ app: APP_NAME, price: PRICE, vapid: VAPID.publicKey, googleWallet: gw.enabled }));
+
+// ===== GOOGLE WALLET =====
+const BASE = (req) => (process.env.PUBLIC_URL || baseUrl(req)).replace(/\/$/, '');
+function walletInfo(shop, base) {
+  const c = config(shop), r = rules(shop);
+  return { baseUrl: base, color: r.period?.color || c.color, goal: r.goal, reward: r.reward, label: c.stampLabel, period: r.period };
+}
+// Après chaque changement de points : met à jour la carte dans le Wallet (sans bloquer la caisse)
+function gwRefresh(cardId, base) {
+  if (!gw.enabled) return;
+  const c = q('SELECT * FROM cards WHERE id=?').get(cardId); if (!c?.gw) return;
+  const s = q('SELECT * FROM shops WHERE id=?').get(c.shop_id);
+  gw.updateObject(s, c, walletInfo(s, base)).catch(e => console.error(e.message));
+}
+app.get('/api/cards/:id/google-wallet', async (req, res) => {
+  if (!gw.enabled) return res.status(404).json({ error: 'Google Wallet n\'est pas activé' });
+  const r = cardById(req.params.id); if (!r) return res.status(404).json({ error: 'Carte introuvable' });
+  const info = walletInfo(r.s, BASE(req));
+  try { await gw.syncClass(r.s, info); } catch (e) { console.error(e.message); }
+  q('UPDATE cards SET gw=1 WHERE id=?').run(r.c.id);
+  res.json({ url: gw.saveUrl(r.s, r.c, info) });
+});
 
 // ===== ADMIN (accès maintenance) =====
 app.post('/api/admin/login', (req, res) => {
@@ -261,6 +284,9 @@ app.put('/api/pro/config', needShop, (req, res) => {
   };
   const name = str(b.name, 80) || req.shop.name;
   q('UPDATE shops SET config=?, name=? WHERE id=?').run(JSON.stringify(next), name, req.shop.id); res.json({ ok: true });
+  if (gw.enabled && q('SELECT 1 FROM cards WHERE shop_id=? AND gw=1').get(req.shop.id)) {
+    const s = q('SELECT * FROM shops WHERE id=?').get(req.shop.id); gw.syncClass(s, walletInfo(s, BASE(req))).catch(e => console.error(e.message));
+  }
 });
 app.post('/api/pro/password', needShop, (req, res) => {
   const pw = str(req.body.password, 100); if (pw.length < 8) return res.status(400).json({ error: '8 caractères minimum' });
@@ -281,13 +307,13 @@ app.post('/api/pro/card/:code/points', needShop, (req, res) => {
   const r = rules(req.shop), base = Math.min(Math.max(parseInt(req.body.points) || r.perVisit, -50), 50);
   const delta = base > 0 ? Math.round(base * r.multiplier) : Math.max(base, -c.points);
   q('UPDATE cards SET points=points+?, earned=earned+?, last_stamp=? WHERE id=?').run(delta, Math.max(delta, 0), now(), c.id);
-  log(req.shop.id, c.id, 'manual', delta);
+  log(req.shop.id, c.id, 'manual', delta); gwRefresh(c.id, BASE(req));
   res.json({ points: c.points + delta, delta, goal: r.goal });
 });
 app.post('/api/pro/card/:code/redeem', needShop, (req, res) => {
   const c = findCard(req.shop, req.params.code); if (!c) return res.status(404).json({ error: 'Aucune carte avec ce code' });
   const r = rules(req.shop); if (c.points < r.goal) return res.status(400).json({ error: `Il manque ${r.goal - c.points} ${config(req.shop).stampLabel}(s)` });
-  q('UPDATE cards SET points=points-?, rewards=rewards+1 WHERE id=?').run(r.goal, c.id); log(req.shop.id, c.id, 'reward', -r.goal);
+  q('UPDATE cards SET points=points-?, rewards=rewards+1 WHERE id=?').run(r.goal, c.id); log(req.shop.id, c.id, 'reward', -r.goal); gwRefresh(c.id, BASE(req));
   res.json({ points: c.points - r.goal, reward: r.reward });
 });
 app.get('/api/pro/periods', needShop, (req, res) => res.json(q('SELECT * FROM periods WHERE shop_id=? ORDER BY start_date DESC').all(req.shop.id)));
@@ -316,6 +342,7 @@ app.post('/api/pro/messages', needShop, async (req, res) => {
   const day = q('SELECT COUNT(*) v FROM messages WHERE shop_id=? AND at>=?').get(req.shop.id, today()).v;
   if (day >= 3) return res.status(429).json({ error: '3 notifications maximum par jour, pour ne pas lasser vos clients' });
   const sent = await pushToShop(req.shop.id, title, body);
+  if (gw.enabled && q('SELECT 1 FROM cards WHERE shop_id=? AND gw=1').get(req.shop.id)) gw.messageAll(req.shop, title, body).catch(e => console.error(e.message));
   q('INSERT INTO messages(shop_id,title,body,sent,at) VALUES(?,?,?,?,?)').run(req.shop.id, title, body, sent, now());
   res.json({ sent });
 });
@@ -344,7 +371,7 @@ app.post('/api/cards/:id/stamp', (req, res) => {
   if (c.last_stamp && Date.now() - Date.parse(c.last_stamp) < cfg.cooldownHours * 3600e3)
     return res.status(429).json({ error: `Un seul ${cfg.stampLabel} toutes les ${cfg.cooldownHours} h` });
   const delta = Math.round(ru.perVisit * ru.multiplier);
-  q('UPDATE cards SET points=points+?, earned=earned+?, last_stamp=? WHERE id=?').run(delta, delta, now(), c.id); log(s.id, c.id, 'stamp', delta);
+  q('UPDATE cards SET points=points+?, earned=earned+?, last_stamp=? WHERE id=?').run(delta, delta, now(), c.id); log(s.id, c.id, 'stamp', delta); gwRefresh(c.id, BASE(req));
   res.json({ ...cardView(q('SELECT * FROM cards WHERE id=?').get(c.id), s), delta });
 });
 app.post('/api/cards/:id/redeem', (req, res) => {
@@ -353,7 +380,7 @@ app.post('/api/cards/:id/redeem', (req, res) => {
   if (limit('pin:' + c.id, 5, 10 * 60e3)) return res.status(429).json({ error: 'Trop d\'essais, réessayez dans 10 minutes' });
   if (String(req.body.pin || '') !== s.pin) return res.status(403).json({ error: 'Code commerçant incorrect' });
   if (c.points < ru.goal) return res.status(400).json({ error: 'Pas encore de récompense disponible' });
-  q('UPDATE cards SET points=points-?, rewards=rewards+1 WHERE id=?').run(ru.goal, c.id); log(s.id, c.id, 'reward', -ru.goal);
+  q('UPDATE cards SET points=points-?, rewards=rewards+1 WHERE id=?').run(ru.goal, c.id); log(s.id, c.id, 'reward', -ru.goal); gwRefresh(c.id, BASE(req));
   res.json({ ...cardView(q('SELECT * FROM cards WHERE id=?').get(c.id), s), reward: ru.reward });
 });
 app.post('/api/cards/:id/push', (req, res) => {
@@ -392,6 +419,7 @@ function syncSubscription(sub) {
 app.get('/api/admin/paypal', needAdmin, (req, res) => res.json({
   keys: paypal.enabled, mode: paypal.MODE, planId: ppPlan(), webhookId: ppHook(), webhookUrl: `${baseUrl(req)}/api/paypal/webhook`,
   subscribers: q('SELECT COUNT(*) v FROM shops WHERE paypal_status=\'ACTIVE\'').get().v,
+  googleWallet: gw.enabled, gwIssuer: gw.ISSUER, gwEmail: gw.email, gwCards: q('SELECT COUNT(*) v FROM cards WHERE gw=1').get().v,
 }));
 app.post('/api/admin/paypal/setup', needAdmin, async (req, res) => {
   const url = `${baseUrl(req)}/api/paypal/webhook`;

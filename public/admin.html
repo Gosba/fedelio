@@ -80,14 +80,15 @@ function draw() {
       <button class="btn danger sm" data-a="del" data-id="${x.id}" type="button">Supprimer</button>
     </div></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty">${data.shops.length ? 'Aucune boutique ne correspond.' : 'Aucune boutique pour l\'instant. Ajoutez votre premier commerçant.'}</div></td></tr>`;
 }
+const gwLine = (p) => `<p style="margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line)"><b>Google Wallet :</b> ${p.googleWallet ? `activé · émetteur ${esc(p.gwIssuer)} · ${p.gwCards} carte${p.gwCards > 1 ? 's' : ''} ajoutée${p.gwCards > 1 ? 's' : ''}<br><span class="hint">Compte de service : ${esc(p.gwEmail)}</span>` : '<span class="muted">non configuré (variables GOOGLE_WALLET_ISSUER_ID et GOOGLE_WALLET_SA_JSON)</span>'}</p>`;
 async function ppAdmin() {
   const el = $('#ppAdmin'); let p;
   try { p = await api('/api/admin/paypal'); } catch { el.hidden = true; return; }
-  if (!p.keys) { el.innerHTML = `<h3>Paiement PayPal : non configuré</h3><p class="muted">Ajoutez les variables PAYPAL_CLIENT_ID et PAYPAL_CLIENT_SECRET dans Railway, puis redémarrez. En attendant, enregistrez les paiements avec « +1 mois payé ».</p>`; return; }
+  if (!p.keys) { el.innerHTML = `<h3>Paiement PayPal : non configuré</h3><p class="muted">Ajoutez les variables PAYPAL_CLIENT_ID et PAYPAL_CLIENT_SECRET dans Railway, puis redémarrez. En attendant, enregistrez les paiements avec « +1 mois payé ».</p>` + gwLine(p); return; }
   el.innerHTML = `<div class="row" style="justify-content:space-between"><div><h3 style="margin:0">PayPal · ${p.mode === 'live' ? 'mode réel' : 'mode test (sandbox)'}</h3>
     <p class="muted" style="margin:4px 0 0">${p.planId ? `Offre ${esc(p.planId)} · ${p.subscribers} prélèvement${p.subscribers > 1 ? 's' : ''} actif${p.subscribers > 1 ? 's' : ''}${p.webhookId ? '' : ' · webhook manquant'}` : 'Clés reconnues. Il reste à créer l\'offre et le webhook.'}</p></div>
     <button class="btn ${p.planId ? 'ghost sm' : 'em'}" id="ppSetup" type="button">${p.planId ? 'Recréer l\'offre' : 'Configurer PayPal automatiquement'}</button></div>
-    <p class="hint">Adresse du webhook : ${esc(p.webhookUrl)}</p>`;
+    <p class="hint">Adresse du webhook : ${esc(p.webhookUrl)}</p>` + gwLine(p);
   $('#ppSetup').onclick = async (e) => {
     const b = e.currentTarget; if (p.planId && !b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Confirmer (les abonnés actuels gardent l\'ancienne offre)'; return; }
     b.disabled = true; b.textContent = 'Configuration…';
